@@ -1,5 +1,4 @@
 # Wasla Windows Portable Build
-# Build Wasla portable for Windows using GitHub Actions
 
 name: Wasla Windows Portable Build
 
@@ -204,14 +203,14 @@ jobs:
           }
           Copy-Item "LICENCE" "$dist/LICENCE.txt" -Force
           if (Test-Path "flutter/LICENSE") { Copy-Item "flutter/LICENSE" "$dist/LICENSE-Flutter.txt" -Force }
-          @"
+          $readme = @"
 # Wasla Portable - Wasla
 
 This executable contains everything needed to run Wasla on Windows without installation.
 
 ## Usage
 1. Extract this folder
-2. Run `wasla-host.exe`
+2. Run wasla-host.exe
 3. Owner panel appears in system tray
 
 ## Requirements
@@ -222,7 +221,8 @@ This executable contains everything needed to run Wasla on Windows without insta
 - Retains original RustDesk AGPL-3.0 license
 - Changes limited to identity (name, icon, description)
 - Initial build, not tested on real Windows device yet
-"@ | Out-File -Encoding UTF8 "$dist/README-Wasla.txt"
+"@
+          $readme | Out-File -Encoding UTF8 "$dist/README-Wasla.txt"
           Compress-Archive -Path "$dist/*" -DestinationPath "wasla-portable-${{ env.WASLA_TAG }}-x64.zip" -Force
           Write-Host "Created: wasla-portable-${{ env.WASLA_TAG }}-x64.zip"
 
