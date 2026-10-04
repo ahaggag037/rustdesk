@@ -1,0 +1,303 @@
+# Wasla Windows Portable Build
+# بناء نسخة محمولة لـ وصلة على Windows باستخدام GitHub Actions
+# يعتمد على flutter-build.yml الأصلي مع تعديلات Wasla
+
+name: Wasla Windows Portable Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload-artifact:
+        type: boolean
+        default: true
+        description: 'Upload artifact as release'
+      wasla-tag:
+        type: string
+        default: "wasla-0.1.0"
+        description: 'Tag name for Wasla release'
+
+env:
+  # تنصيب نفس الإصدارات المثبتة في CI الأصلي
+  SCITER_RUST_VERSION: "1.75"
+  RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  LLVM_VERSION: "15.0.6"
+  VCPKG_COMMIT_ID: "b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c"
+  VERSION: "1.3.7-wasla"
+  WASLA_TAG: ${{ github.event.inputs.wasla-tag }}
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-RustDeskTempTopMostWindow:
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: ${{ inputs.upload-artifact }}
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+
+  build-wasla-windows-portable:
+    name: Build Wasla Portable (x64)
+    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {
+              target: x86_64-pc-windows-msvc,
+              os: windows-2022,
+              arch: x64,
+              vcpkg-triplet: x64-windows-static,
+            }
+
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@master
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      # تطبيق محرك Flutter المخصص من RustDesk (ضروري للبناء)
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter (if needed)
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: ${{ matrix.job.target }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.job.os }}-flutter
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet ${{ matrix.job.vcpkg-triplet }} \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+          head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
+        shell: bash
+
+      # --- إعداد هوية Wasla (تغييرات بسيطة لا تكسر البناء) ---
+      - name: Apply Wasla branding
+        shell: pwsh
+        run: |
+          # 1. تحديث اسم التطبيق في Cargo.toml
+          (Get-Content Cargo.toml) -replace 'name = "rustdesk"', 'name = "wasla"' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'description = "RustDesk Remote Desktop"', 'description = "Wasla Remote Desktop - Arabic-first"' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'LegalCopyright = "Copyright © 2024 Purslane Ltd. All rights reserved."', 'LegalCopyright = "Copyright © 2026 Wasla. All rights reserved."' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'ProductName = "RustDesk"', 'ProductName = "Wasla"' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'FileDescription = "RustDesk Remote Desktop"', 'FileDescription = "Wasla Windows Host"' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'OriginalFilename = "rustdesk.exe"', 'OriginalFilename = "wasla-host.exe"' | Set-Content Cargo.toml
+
+          # 2. تحديث إصدار البناء (يحافظ على الأساس)
+          $version = "0.1.0"
+          (Get-Content Cargo.toml) -replace 'version = "1.3.7"', "version = `"`$version`"`" | Set-Content Cargo.toml
+
+          # 3. ملفات Flutter - تحديث الاسم والأيقونة
+          (Get-Content flutter/pubspec.yaml) -replace 'name: rustdesk', 'name: wasla_windows' | Set-Content flutter/pubspec.yaml
+          (Get-Content flutter/pubspec.yaml) -replace 'description: "RustDesk Remote Desktop"', 'description: "Wasla Windows Owner Panel - Arabic-first Remote Desktop Host"' | Set-Content flutter/pubspec.yaml
+
+          # 4. تحديث manifest للـ portable packer
+          if (Test-Path "res/manifest.xml") {
+            (Get-Content res/manifest.xml) -replace 'RustDesk', 'Wasla' | Set-Content res/manifest.xml
+            (Get-Content res/manifest.xml) -replace 'rustdesk', 'wasla' | Set-Content res/manifest.xml
+          }
+
+          # 5. تحديث موارد Flutter Windows (Runner.rc)
+          if (Test-Path "flutter/windows/runner/Runner.rc") {
+            (Get-Content flutter/windows/runner/Runner.rc) -replace 'RustDesk', 'Wasla' | Set-Content flutter/windows/runner/Runner.rc
+            (Get-Content flutter/windows/runner/Runner.rc) -replace 'rustdesk', 'wasla' | Set-Content flutter/windows/runner/Runner.rc
+          }
+
+          # 6. الأيقونة - استخدام أيقونة Wasla إذا توفرت، وإلا نستخدم الموجودة
+          # سنحتفظ بأيقونة RustDesk الحالية كبديل
+
+      - name: Build Wasla (flutter + portable)
+        shell: pwsh
+        run: |
+          # بناء المكتبة الأساسية مع ميزات flutter و hwcodec
+          cargo build --features flutter,hwcodec --lib --release
+
+          # التحقق من وجود المكتبة
+          if (-not (Test-Path "target/release/librustdesk.dll")) {
+            Write-Error "cargo build failed - librustdesk.dll not found"
+            exit -1
+          }
+
+          # بناء مكتبة العرض الافتراضي (virtual display)
+          Set-Location libs/virtual_display/dylib
+          cargo build --release
+          Set-Location ../../..
+
+          # بناء Flutter Windows
+          Set-Location flutter
+          flutter build windows --release
+          Set-Location ..
+
+          # نسخ الملفات المطلوبة
+          Copy-Item "target/release/deps/dylib_virtual_display.dll" "flutter/build/windows/x64/runner/Release/" -Force
+
+          # بناء الحزمة المحمولة (Portable packer)
+          Set-Location libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../flutter/build/windows/x64/runner/Release/ -o . -e ../../flutter/build/windows/x64/runner/Release/rustdesk.exe
+          Set-Location ../..
+
+          # البحث عن الملف المولد
+          if (Test-Path "target/release/rustdesk-portable-packer.exe") {
+            Move-Item "target/release/rustdesk-portable-packer.exe" "wasla-portable.exe" -Force
+            Write-Host "Built: wasla-portable.exe"
+          } else {
+            Write-Error "Portable packer not found"
+            exit -1
+          }
+
+      - name: Download RustDeskTempTopMostWindow artifacts
+        uses: actions/download-artifact@master
+        if: ${{ inputs.upload-artifact }}
+        with:
+          name: topmostwindow-artifacts
+          path: "./flutter/build/windows/x64/runner/Release"
+
+      - name: Create Wasla distribution folder
+        shell: pwsh
+        run: |
+          $dist = "wasla-dist"
+          if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+          New-Item -ItemType Directory -Path $dist | Out-Null
+
+          # نسخ الملف التنفيذي المحمول
+          Copy-Item "wasla-portable.exe" "$dist/wasla-host.exe"
+
+          # نسخ usbmmidd_v2 (للوحة المفاتيح/الماوس)
+          if (Test-Path "usbmmidd_v2") {
+            Copy-Item "usbmmidd_v2" "$dist/" -Recurse
+          }
+
+          # نسخ ملفات الترخيص
+          Copy-Item "LICENCE" "$dist/LICENCE.txt" -Force
+          if (Test-Path "flutter/LICENSE") { Copy-Item "flutter/LICENSE" "$dist/LICENSE-Flutter.txt" -Force }
+
+          # إنشاء README مختصر
+          @"
+# Wasla Portable - وصلة (نسخة محمولة)
+
+هذا الملف التنفيذي يحتوي على كل ما يلزم لتشغيل وصلة على Windows دون تثبيت.
+
+## التشغيل
+1. فك الضغط عن هذا المجلد
+2. شغّل `wasla-host.exe`
+3. ستظهر لوحة التحكم في شريط النظام (system tray)
+
+## المتطلبات
+- Windows 10/11 64-bit
+- لا يحتاج تثبيت Python أو Visual Studio أو Flutter
+
+## الملاحظات
+- تحتفظ بالترخيص AGPL-3.0 الأصلي لـ RustDesk
+- التغييرات محدودة بالهوية (الاسم، الأيقونة، الوصف)
+- هذا بناء أولي، لم يُختبر على جهاز Windows حقيقي بعد
+
+"@ | Out-File -Encoding UTF8 "$dist/README-Wasla.txt"
+
+          # ضغط المجلد
+          Compress-Archive -Path "$dist/*" -DestinationPath "wasla-portable-${{ env.WASLA_TAG }}-x64.zip" -Force
+          Write-Host "Created: wasla-portable-${{ env.WASLA_TAG }}-x64.zip"
+
+      - name: Upload Wasla Portable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasla-portable-windows
+          path: |
+            wasla-portable-${{ env.WASLA_TAG }}-x64.zip
+            wasla-portable.exe
+          retention-days: 30
+
+      - name: Publish Wasla Release
+        if: ${{ inputs.upload-artifact }}
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: true
+          tag_name: ${{ env.WASLA_TAG }}
+          name: Wasla Portable ${{ env.WASLA_TAG }} (Windows x64)
+          body: |
+            # Wasla Portable Windows x64
+
+            هذا الإصدار التجريبي المبكر لـ **وصلة | Wasla** - أداة تحكم عن بعد عربية أولاً.
+
+            ## محتويات الحزمة
+            - `wasla-host.exe` - الملف التنفيذي المحمول
+            - `usbmmidd_v2/` - برنامج تشغيل لوحة المفاتيح/الماوس (للتثبيت اختياري)
+            - `LICENCE.txt` - ترخيص AGPL-3.0
+            - `README-Wasla.txt` - تعليمات مختصرة
+
+            ## ملاحظات هامة
+            - هذا بناء من كود RustDesk 1.3.7 مع تغييرات هوية فقط
+            - لم يُختبر على جهاز Windows حقيقي بعد (بناء سحابي فقط)
+            - ميزات الاقتران والمساعد وموازنة المسارات ستضاف لاحقاً
+            - الترخيص الأصلي محفوظ كما هو
+
+          files: |
+            wasla-portable-${{ env.WASLA_TAG }}-x64.zip
