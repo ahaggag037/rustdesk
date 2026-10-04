@@ -2,7 +2,7 @@
 
 name: Wasla Windows Portable Build
 
-on:
+'on':
   workflow_dispatch:
     inputs:
       upload-artifact:
