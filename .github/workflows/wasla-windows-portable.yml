@@ -203,26 +203,23 @@ jobs:
           }
           Copy-Item "LICENCE" "$dist/LICENCE.txt" -Force
           if (Test-Path "flutter/LICENSE") { Copy-Item "flutter/LICENSE" "$dist/LICENSE-Flutter.txt" -Force }
-          $readme = @"
-# Wasla Portable - Wasla
-
-This executable contains everything needed to run Wasla on Windows without installation.
-
-## Usage
-1. Extract this folder
-2. Run wasla-host.exe
-3. Owner panel appears in system tray
-
-## Requirements
-- Windows 10/11 64-bit
-- No Python, Visual Studio, or Flutter installation needed
-
-## Notes
-- Retains original RustDesk AGPL-3.0 license
-- Changes limited to identity (name, icon, description)
-- Initial build, not tested on real Windows device yet
-"@
-          $readme | Out-File -Encoding UTF8 "$dist/README-Wasla.txt"
+          Write-Output "# Wasla Portable" | Out-File -Encoding UTF8 "$dist/README-Wasla.txt"
+          Write-Output "" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "This executable contains everything needed to run Wasla on Windows without installation." | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "## Usage" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "1. Extract this folder" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "2. Run wasla-host.exe" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "3. Owner panel appears in system tray" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "## Requirements" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "- Windows 10/11 64-bit" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "- No Python, Visual Studio, or Flutter installation needed" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "## Notes" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "- Retains original RustDesk AGPL-3.0 license" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "- Changes limited to identity (name, icon, description)" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
+          Write-Output "- Initial build, not tested on real Windows device yet" | Out-File -Encoding UTF8 -Append "$dist/README-Wasla.txt"
           Compress-Archive -Path "$dist/*" -DestinationPath "wasla-portable-${{ env.WASLA_TAG }}-x64.zip" -Force
           Write-Host "Created: wasla-portable-${{ env.WASLA_TAG }}-x64.zip"
 
