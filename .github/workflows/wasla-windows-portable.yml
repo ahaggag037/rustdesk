@@ -135,12 +135,11 @@ jobs:
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
-      - name: Apply Wasla branding
+      - name: Apply Wasla branding (metadata only, keep package name)
         shell: pwsh
         run: |
-          (Get-Content Cargo.toml) -replace 'name = "rustdesk"', 'name = "wasla"' | Set-Content Cargo.toml
           (Get-Content Cargo.toml) -replace 'description = "RustDesk Remote Desktop"', 'description = "Wasla Remote Desktop - Arabic-first"' | Set-Content Cargo.toml
-          (Get-Content Cargo.toml) -replace 'LegalCopyright = "Copyright © 2024 Purslane Ltd. All rights reserved."', 'LegalCopyright = "Copyright © 2026 Wasla. All rights reserved."' | Set-Content Cargo.toml
+          (Get-Content Cargo.toml) -replace 'LegalCopyright = "Copyright Â© 2024 Purslane Ltd. All rights reserved."', 'LegalCopyright = "Copyright Â© 2026 Wasla. All rights reserved."' | Set-Content Cargo.toml
           (Get-Content Cargo.toml) -replace 'ProductName = "RustDesk"', 'ProductName = "Wasla"' | Set-Content Cargo.toml
           (Get-Content Cargo.toml) -replace 'FileDescription = "RustDesk Remote Desktop"', 'FileDescription = "Wasla Windows Host"' | Set-Content Cargo.toml
           (Get-Content Cargo.toml) -replace 'OriginalFilename = "rustdesk.exe"', 'OriginalFilename = "wasla-host.exe"' | Set-Content Cargo.toml
@@ -160,6 +159,7 @@ jobs:
       - name: Build Wasla (flutter + portable)
         shell: pwsh
         run: |
+          # Keep package name as "rustdesk" - do NOT change it
           cargo build --features flutter,hwcodec --lib --release
           if (-not (Test-Path "target/release/librustdesk.dll")) {
             Write-Error "cargo build failed - librustdesk.dll not found"
@@ -184,6 +184,24 @@ jobs:
             exit -1
           }
 
+      - name: Rename final installer to Wasla
+        shell: pwsh
+        run: |
+          # The portable packer outputs: rustdesk-{version}-install.exe
+          # Rename to wasla-{version}-install.exe
+          $installer = Get-Item rustdesk-*-install.exe -ErrorAction SilentlyContinue
+          if ($installer) {
+            $newName = $installer.Name -replace "^rustdesk-", "wasla-"
+            Move-Item $installer.FullName $newName -Force
+            Write-Host "Renamed installer to: $newName"
+          } else {
+            Write-Warning "Installer not found, checking for rustdesk_portable.exe"
+            if (Test-Path "rustdesk_portable.exe") {
+              Move-Item "rustdesk_portable.exe" "wasla-portable.exe" -Force
+              Write-Host "Renamed portable to: wasla-portable.exe"
+            }
+          }
+
       - name: Download RustDeskTempTopMostWindow artifacts
         uses: actions/download-artifact@v4
         if: ${{ inputs.upload-artifact }}
@@ -197,7 +215,17 @@ jobs:
           $dist = "wasla-dist"
           if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
           New-Item -ItemType Directory -Path $dist | Out-Null
-          Copy-Item "wasla-portable.exe" "$dist/wasla-host.exe"
+          # Copy portable exe (from portable packer output)
+          if (Test-Path "wasla-portable.exe") {
+            Copy-Item "wasla-portable.exe" "$dist/wasla-host.exe"
+            Write-Host "Copied wasla-portable.exe as wasla-host.exe"
+          } elseif (Test-Path "rustdesk_portable.exe") {
+            Copy-Item "rustdesk_portable.exe" "$dist/wasla-host.exe"
+            Write-Host "Copied rustdesk_portable.exe as wasla-host.exe"
+          } else {
+            Write-Warning "No portable exe found"
+          }
+          
           if (Test-Path "usbmmidd_v2") {
             Copy-Item "usbmmidd_v2" "$dist/" -Recurse
           }
