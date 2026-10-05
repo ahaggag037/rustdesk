@@ -40,6 +40,8 @@ jobs:
     name: Build Wasla Portable (x64)
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
     runs-on: windows-2022
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
